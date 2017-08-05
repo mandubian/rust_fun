@@ -36,6 +36,7 @@ struct CNilK<A> {
 // The Type-Constructor Coproduct Cop<A> = Left<A> :+: Right<A> constrained by IsCopK so that
 #[derive(Clone, Debug)]
 enum CopK<A, L, R> where CopK<A, L, R>:IsCopK {
+  // we need PhantomData to keep track of type A
   Inl(L, PhantomData<A>),
   Inr(R, PhantomData<A>),
 }
@@ -90,11 +91,12 @@ impl<A, B, L: IsTypeCons<A> + TypeCons<A> + TypeCons<B>> TypeCons<B> for CopK<A,
   type FB = CopK<B, <L as TypeCons<B>>::FB, CNilK<B>>;
 }
 
-impl<A, B, L: IsTypeCons<A> + TypeCons<A> + TypeCons<B>, R: IsCopK + IsTypeCons<A> + TypeCons<A> + TypeCons<B>> TypeCons<B> for CopK<A, L, R>
+impl<A, B, L: IsTypeCons<A> + TypeCons<A> + TypeCons<B>, R: IsCopK + IsTypeCons<A> + TypeCons<A> + TypeCons<B>> TypeCons<B>
+  for CopK<A, L, R>
   where <L as TypeCons<B>>::FB : TypeCons<B>, <R as TypeCons<B>>::FB: IsCopK {
-  type A = A;
-  type FB = CopK<B, <L as TypeCons<B>>::FB, <R as TypeCons<B>>::FB>;
-}
+    type A = A;
+    type FB = CopK<B, <L as TypeCons<B>>::FB, <R as TypeCons<B>>::FB>;
+  }
 
 impl<A, B> TypeCons<B> for CNilK<A> {
   type A = A;
@@ -107,6 +109,7 @@ trait Functor<A, B> where Self:TypeCons<B> {
   fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B;
 }
 
+// Functor for Option
 impl<A, B> Functor<A, B> for Option<A> {
   fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {
     match self {
@@ -116,6 +119,7 @@ impl<A, B> Functor<A, B> for Option<A> {
   }
 } 
 
+// Functor for Vec
 impl<A, B> Functor<A, B> for Vec<A> {
   fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {        
     let mut v = Vec::<B>::new();
@@ -126,6 +130,7 @@ impl<A, B> Functor<A, B> for Vec<A> {
   }
 } 
 
+// Functor for CopK
 impl<A, B, L: IsTypeCons<A> + TypeCons<A> + Functor<A, B>>
   Functor<A, B> for CopK<A, L, CNilK<A>>
   where <L as TypeCons<B>>::FB : TypeCons<B> {
@@ -193,7 +198,7 @@ fn main() {
 
 
 
-
+// keeping track of experiments
 
 
 // macro_rules! derive_TypeCons {
