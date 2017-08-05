@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-// Having fun in Rust with mimic higher-kind structures
+// Having fun in Rust trying to mimic higher-kind structures, abstracting on type constructors
 // Inspired by different existing rust projects:
 // - https://github.com/Sgeo/hlist/blob/master/src/lib.rs
 // - https://github.com/lloydmeta/frunk/blob/master/src/functor.rs
 
-// Basic Coproduct (like scala shapeless coproduct)
+// Basic Coproduct (like scala shapeless coproduct L :+: R)
 
 // non-instantiable type to represent coproduct ending type CNil
 #[derive(Clone, Debug)]
@@ -18,7 +18,9 @@ enum Cop<L, R> where Cop<L, R>:IsCop {
   Inr(R),
 }
 
-// Constraint forcing last Coproduct L :+: CNil
+// Constraint
+// - L :+: CNil is a Coproduct but CNil can't exist
+// - L :+: R requires R to a Coproduct
 trait IsCop {}
 impl<L> IsCop for Cop<L, CNil> {}
 impl<L, R : IsCop> IsCop for Cop<L, R> {}
@@ -34,6 +36,7 @@ struct CNilK<A> {
 }
 
 // The Type-Constructor Coproduct Cop<A> = Left<A> :+: Right<A> constrained by IsCopK so that
+// I would have liked to use new Rust unions here but was blocked by unsafe union pattern matching that behaved weird
 #[derive(Clone, Debug)]
 enum CopK<A, L, R> where CopK<A, L, R>:IsCopK {
   // we need PhantomData to keep track of type A
@@ -60,12 +63,16 @@ impl<A> IsTypeCons<A> for CNilK<A> {}
 impl<A, L: IsTypeCons<A>> IsTypeCons<A> for CopK<A, L, CNilK<A>> {}
 impl<A, L: IsTypeCons<A>, R : IsCopK + IsTypeCons<A>> IsTypeCons<A> for CopK<A, L, R> {}
 
-// Coproduct constraint (L<A> :+: CNilK<A> is a CopK but CNilK<A> alone isn't)
+
+// Constraint
+// - L<A> :+: CNilK<A> is a Coproduct but CNil<A> can't exist
+// - L<A> :+: R<A> requires R<AQ to a Coproduct
 trait IsCopK {}
 impl<A, L: IsTypeCons<A>> IsCopK for CopK<A, L, CNilK<A>> {}
 impl<A, L: IsTypeCons<A>, R : IsCopK + IsTypeCons<A>> IsCopK for CopK<A, L, R> {}
 
 // The Type Constructor (F: * -> *) which can build a type F[B] from a F[A]
+// In theory, IsTypeCons could be proven from TypeCons but rust compiler wasn't happy about that... need deeper studying
 trait TypeCons<B> {
   type A;  // A
   type FB : IsTypeCons<B> ; // F[B]
@@ -105,6 +112,7 @@ impl<A, B> TypeCons<B> for CNilK<A> {
 
 
 // Functor
+// A & B are required to identify morphism (A -> B) and build TypeCons<B>
 trait Functor<A, B> where Self:TypeCons<B> {
   fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B;
 }
@@ -178,6 +186,7 @@ fn main() {
   let ckk: CopK!(i32, Vec<i32>, Option<i32>) = CopK::Inl(vec!(42), PhantomData);
   let ckk2: CopK!(i32, Vec<i32>, Option<i32>) = CopK::Inr(CopK::Inl(Some(42), PhantomData), PhantomData);
 
+  // Using Functor of CopK
   let ckk_1 = ckk.map(|x| x + 1);
   let ckk2_1 = ckk2.map(|x| x + 1);
 
