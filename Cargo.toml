@@ -1,0 +1,6 @@
+[package]
+name = "rust_fun"
+version = "0.1.0"
+authors = ["mandubian <pascal.voitot.dev@gmail.com>"]
+
+[dependencies]
