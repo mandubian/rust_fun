@@ -1,92 +1,114 @@
 use std::marker::PhantomData;
 
+// Having fun in Rust with mimic higher-kind structures
+// Inspired by different existing rust projects:
+// - https://github.com/Sgeo/hlist/blob/master/src/lib.rs
+// - https://github.com/lloydmeta/frunk/blob/master/src/functor.rs
 
-// fake type
+// Basic Coproduct (like scala shapeless coproduct)
+
+// non-instantiable type to represent coproduct ending type CNil
 #[derive(Clone, Debug)]
 enum CNil {}
 
-// coproduct type constrained by IsCop to avoid building bad formatted Cop
+// coproduct type constrained by IsCop to avoid building bad Cop
 #[derive(Clone, Debug)]
 enum Cop<L, R> where Cop<L, R>:IsCop {
   Inl(L),
   Inr(R),
 }
 
-// Constraint 
+// Constraint forcing last Coproduct L :+: CNil
 trait IsCop {}
 impl<L> IsCop for Cop<L, CNil> {}
 impl<L, R : IsCop> IsCop for Cop<L, R> {}
 
 
+// Coproduct of type constructors
+// Cop<A> = Vec<A> :+: Option<A> :+: CNilK<A>
+
+// Couldn't make it non-instantiable type
 #[derive(Clone, Debug)]
 struct CNilK<A> {
   _m: PhantomData<A>
 }
 
+// The Type-Constructor Coproduct Cop<A> = Left<A> :+: Right<A> constrained by IsCopK so that
 #[derive(Clone, Debug)]
 enum CopK<A, L, R> where CopK<A, L, R>:IsCopK {
   Inl(L, PhantomData<A>),
   Inr(R, PhantomData<A>),
 }
 
-
-// a Kinded type (F: * -> *)
-trait IsKinded<A> {}
-impl<A> IsKinded<A> for Vec<A> {}
-impl<A> IsKinded<A> for Option<A> {}
-impl<A> IsKinded<A> for CNilK<A> {}
-impl<A, L: IsKinded<A>> IsKinded<A> for CopK<A, L, CNilK<A>> {}
-impl<A, L: IsKinded<A>, R : IsCopK + IsKinded<A>> IsKinded<A> for CopK<A, L, R> {}
-
-trait IsCopK {}
-impl<A, L: IsKinded<A>> IsCopK for CopK<A, L, CNilK<A>> {}
-impl<A, L: IsKinded<A>, R : IsCopK + IsKinded<A>> IsCopK for CopK<A, L, R> {}
-
-// a Kinded type (F: * -> *) structure which can build a type F[B] from a F[A]
-trait Kinded<B> {
-  type A;  // A
-  type FB : IsKinded<B> ; // F[B]
+// Macro CopK type helper
+macro_rules! CopK {
+  ($simple:ty, $first: ty) => {
+    CopK<$simple, $first, CNilK<$simple>>
+  };
+  ($simple:ty, $first: ty, $( $repeated: ty ), +) => {
+    CopK<$simple, $first, CopK!($simple, $($repeated), *)>
+  };
 }
 
-// macro helper
-macro_rules! derive_kinded {
+
+// Simple type constructor notice (F: * -> *)
+trait IsTypeCons<A> {}
+impl<A> IsTypeCons<A> for Vec<A> {}
+impl<A> IsTypeCons<A> for Option<A> {}
+impl<A> IsTypeCons<A> for CNilK<A> {}
+impl<A, L: IsTypeCons<A>> IsTypeCons<A> for CopK<A, L, CNilK<A>> {}
+impl<A, L: IsTypeCons<A>, R : IsCopK + IsTypeCons<A>> IsTypeCons<A> for CopK<A, L, R> {}
+
+// Coproduct constraint (L<A> :+: CNilK<A> is a CopK but CNilK<A> alone isn't)
+trait IsCopK {}
+impl<A, L: IsTypeCons<A>> IsCopK for CopK<A, L, CNilK<A>> {}
+impl<A, L: IsTypeCons<A>, R : IsCopK + IsTypeCons<A>> IsCopK for CopK<A, L, R> {}
+
+// The Type Constructor (F: * -> *) which can build a type F[B] from a F[A]
+trait TypeCons<B> {
+  type A;  // A
+  type FB : IsTypeCons<B> ; // F[B]
+}
+
+// TypeCons macro helper
+macro_rules! derive_TypeCons {
   ($t:ident) => {
-    impl<T, U> Kinded<U> for $t<T> {
+    impl<T, U> TypeCons<U> for $t<T> {
       type A = T;
       type FB = $t<U>;
     }
   }
 }
 
-derive_kinded!(Vec);
-derive_kinded!(Option);
+derive_TypeCons!(Vec);
+derive_TypeCons!(Option);
 
-// CopK Kinded<B>
-impl<A, B, L: IsKinded<A> + Kinded<A> + Kinded<B>> Kinded<B> for CopK<A, L, CNilK<A>>
-  where <L as Kinded<B>>::FB : Kinded<B> {
+// CopK TypeCons<B>
+impl<A, B, L: IsTypeCons<A> + TypeCons<A> + TypeCons<B>> TypeCons<B> for CopK<A, L, CNilK<A>>
+  where <L as TypeCons<B>>::FB : TypeCons<B> {
   type A = A;
-  type FB = CopK<B, <L as Kinded<B>>::FB, CNilK<B>>;
+  type FB = CopK<B, <L as TypeCons<B>>::FB, CNilK<B>>;
 }
 
-impl<A, B, L: IsKinded<A> + Kinded<A> + Kinded<B>, R: IsCopK + IsKinded<A> + Kinded<A> + Kinded<B>> Kinded<B> for CopK<A, L, R>
-  where <L as Kinded<B>>::FB : Kinded<B>, <R as Kinded<B>>::FB: IsCopK {
+impl<A, B, L: IsTypeCons<A> + TypeCons<A> + TypeCons<B>, R: IsCopK + IsTypeCons<A> + TypeCons<A> + TypeCons<B>> TypeCons<B> for CopK<A, L, R>
+  where <L as TypeCons<B>>::FB : TypeCons<B>, <R as TypeCons<B>>::FB: IsCopK {
   type A = A;
-  type FB = CopK<B, <L as Kinded<B>>::FB, <R as Kinded<B>>::FB>;
+  type FB = CopK<B, <L as TypeCons<B>>::FB, <R as TypeCons<B>>::FB>;
 }
 
-impl<A, B> Kinded<B> for CNilK<A> {
+impl<A, B> TypeCons<B> for CNilK<A> {
   type A = A;
   type FB = CNilK<B>;
 }
 
 
 // Functor
-trait Functor<A, B> where Self:Kinded<B> {
-  fn map<F>(&self, f:F) -> <Self as Kinded<B>>::FB where F: Fn(&A) -> B;
+trait Functor<A, B> where Self:TypeCons<B> {
+  fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B;
 }
 
 impl<A, B> Functor<A, B> for Option<A> {
-  fn map<F>(&self, f:F) -> <Self as Kinded<B>>::FB where F: Fn(&A) -> B {
+  fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {
     match self {
       &Some(ref a) => Some(f(a)),
       &None => None
@@ -95,7 +117,7 @@ impl<A, B> Functor<A, B> for Option<A> {
 } 
 
 impl<A, B> Functor<A, B> for Vec<A> {
-  fn map<F>(&self, f:F) -> <Self as Kinded<B>>::FB where F: Fn(&A) -> B {        
+  fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {        
     let mut v = Vec::<B>::new();
     for x in self {
       v.push(f(x));
@@ -104,75 +126,79 @@ impl<A, B> Functor<A, B> for Vec<A> {
   }
 } 
 
-impl<
-  A, B,
-  L: IsKinded<A> + Kinded<A> + Functor<A, B>
-> Functor<A, B> for CopK<A, L, CNilK<A>>
-  where <L as Kinded<B>>::FB : Kinded<B> {
-  fn map<F>(&self, f:F) -> <Self as Kinded<B>>::FB where F: Fn(&A) -> B {        
-    match self {
-      &CopK::Inl(ref l, _) => CopK::Inl(l.map(f), PhantomData),
-      &CopK::Inr(_, _) => panic!("can't reach that case"),
+impl<A, B, L: IsTypeCons<A> + TypeCons<A> + Functor<A, B>>
+  Functor<A, B> for CopK<A, L, CNilK<A>>
+  where <L as TypeCons<B>>::FB : TypeCons<B> {
+    fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {        
+      match self {
+        &CopK::Inl(ref l, _) => CopK::Inl(l.map(f), PhantomData),
+        &CopK::Inr(_, _) => panic!("can't reach that case"),
+      }
     }
   }
-} 
-
 
 impl<
   A, B,
-  L: IsKinded<A> + Kinded<A> + Functor<A, B>,
-  R: IsCopK + IsKinded<A> + Kinded<A> + Functor<A, B>
+  L: IsTypeCons<A> + TypeCons<A> + Functor<A, B>,
+  R: IsCopK + IsTypeCons<A> + TypeCons<A> + Functor<A, B>
 > Functor<A, B> for CopK<A, L, R>
-  where <L as Kinded<B>>::FB : Kinded<B>, <R as Kinded<B>>::FB: IsCopK {
-  fn map<F>(&self, f:F) -> <Self as Kinded<B>>::FB where F: Fn(&A) -> B {        
-    match self {
-      &CopK::Inl(ref l, _) => CopK::Inl(l.map(f), PhantomData),
-      &CopK::Inr(ref r, _) => CopK::Inr(r.map(f), PhantomData)
+  where <L as TypeCons<B>>::FB : TypeCons<B>, <R as TypeCons<B>>::FB: IsCopK {
+    fn map<F>(&self, f:F) -> <Self as TypeCons<B>>::FB where F: Fn(&A) -> B {        
+      match self {
+        &CopK::Inl(ref l, _) => CopK::Inl(l.map(f), PhantomData),
+        &CopK::Inr(ref r, _) => CopK::Inr(r.map(f), PhantomData)
+      }
     }
   }
-} 
 
 
 fn main() {
-  println!("Hello, world!");
 
-  // let c: Inl<&str, CNil> = Inl::new("toto");
-  // let c2: Inr<&str, CNil> = Inr::new("toto");
-  // let c: Cop<&u32, Cop<&str, Cop<&u32, CNil>>> = Cop { inr : Cop { inl: "toto" } };
+  // Basic Coproduct
   let c: Cop<u32, Cop<&str, Cop<u32, CNil>>> = Cop::Inr(Cop::Inl("toto"));
   println!("c:{:?}", c);
 
   let c2: Cop<u32, Cop<&str, CNil>> = Cop::Inr(Cop::Inl("toto"));
   println!("c2:{:?}", c2);
 
-  // type CK = CopK!(&str, Vec, Option);
-
-  let ck: CopK<&str, Vec<&str>, CopK<&str, Option<&str>, CNilK<&str>>> = CopK::Inl(vec!("toto"), PhantomData);
-  let ck2: CopK<&str, Vec<&str>, CopK<&str, Option<&str>, CNilK<&str>>> = CopK::Inr(CopK::Inl(Some("toto"), PhantomData), PhantomData);
+  // Type-Constructor Coproduct
+  let ck: CopK!(&str, Vec<&str>, Option<&str>) = CopK::Inl(vec!("toto"), PhantomData);
+  let ck2: CopK!(&str, Vec<&str>, Option<&str>) = CopK::Inr(CopK::Inl(Some("toto"), PhantomData), PhantomData);
 
   let ck_1 = ck.map(|x| format!("{}_{}", x, "tata1"));
   let ck2_1 = ck2.map(|x| format!("{}_{}", x, "tata2"));
 
   println!("ck:{:?} ck2:{:?} ck_1:{:?} ck2_1:{:?}", ck, ck2, ck_1, ck2_1);
 
+  let ckk: CopK!(i32, Vec<i32>, Option<i32>) = CopK::Inl(vec!(42), PhantomData);
+  let ckk2: CopK!(i32, Vec<i32>, Option<i32>) = CopK::Inr(CopK::Inl(Some(42), PhantomData), PhantomData);
+
+  let ckk_1 = ckk.map(|x| x + 1);
+  let ckk2_1 = ckk2.map(|x| x + 1);
+
+  println!("ckk:{:?} ckk2:{:?} ckk_1:{:?} ckk2_1:{:?}", ckk, ckk2, ckk_1, ckk2_1);
+
 }
 
 
 
 
-// #[macro_export]
-// macro_rules! CopK {
-//   ($single: ty) => {
-//     CopK<$single, CNilK<$single>>
-//   };
-//   ($simple:ty, $first: ty, $( $repeated: ty ), +) => {
-//     CopK<$simple, $first<$single>, CopK!($simple, $($repeated), *)>
-//   };
-// }
 
-// macro_rules! derive_Kinded {
+
+
+
+
+
+
+
+
+
+
+
+
+// macro_rules! derive_TypeCons {
 //     ($t:ident) => {
-//         impl<T, U> Kinded<U> for $t<T> {
+//         impl<T, U> TypeCons<U> for $t<T> {
 //             type C = T;
 //             type T = $t<U>;
 //         }
@@ -246,9 +272,9 @@ fn main() {
 
 // trait Is<A, B> {
 
-//   fn subst<FA>(f: &FA) -> &<FA as Kinded<B>>::FB where FA : Kinded<B, A = A>;
+//   fn subst<FA>(f: &FA) -> &<FA as TypeCons<B>>::FB where FA : TypeCons<B, A = A>;
 
-//   fn coerce(a: &A) -> &B where A: Kinded<B, A = A, FB = B> {
+//   fn coerce(a: &A) -> &B where A: TypeCons<B, A = A, FB = B> {
 //     Self::subst::<A>(a)
 //   }
 
@@ -256,18 +282,18 @@ fn main() {
 // }
 
 // impl<A> Is<A, A> for A {
-//   fn subst<FA>(f: &FA) -> &<FA as Kinded<A>>::FB where FA : Kinded<A, A = A> {
-//     unsafe { std::mem::transmute::<&FA, &<FA as Kinded<A>>::FB>(f) }
+//   fn subst<FA>(f: &FA) -> &<FA as TypeCons<A>>::FB where FA : TypeCons<A, A = A> {
+//     unsafe { std::mem::transmute::<&FA, &<FA as TypeCons<A>>::FB>(f) }
 //   }
 // }
 
-// trait IsF<A, B> where Self : Kinded<B, A = A> {
-//   fn subst(&self) -> &<Self as Kinded<B>>::FB;
+// trait IsF<A, B> where Self : TypeCons<B, A = A> {
+//   fn subst(&self) -> &<Self as TypeCons<B>>::FB;
 // }
 
-// impl<A, FA> IsF<A, A> for FA where FA : Kinded<A, A = A> {
-//   fn subst(&self) -> &<FA as Kinded<A>>::FB {
-//     unsafe { std::mem::transmute::<&FA, &<FA as Kinded<A>>::FB>(self) }
+// impl<A, FA> IsF<A, A> for FA where FA : TypeCons<A, A = A> {
+//   fn subst(&self) -> &<FA as TypeCons<A>>::FB {
+//     unsafe { std::mem::transmute::<&FA, &<FA as TypeCons<A>>::FB>(self) }
 //   }
 // }
 
